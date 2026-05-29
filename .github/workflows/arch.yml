@@ -1,0 +1,65 @@
+name: arch
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arch-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Arch package
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          docker run --rm -i \
+            -e GITHUB_RUN_NUMBER \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/artifacts:/artifacts" \
+            archlinux:latest \
+            bash -euxo pipefail <<'EOF'
+          pacman -Syu --noconfirm --needed \
+            base-devel \
+            git \
+            glib2 \
+            json-glib \
+            libevdev \
+            libunistring \
+            meson \
+            ninja \
+            pkgconf \
+            python \
+            python-evdev \
+            python-gobject \
+            swig \
+            systemd
+
+          useradd -m builder
+          cp -a /workspace /home/builder/src
+          install -d -o builder -g builder /home/builder/pkgbuild
+          cp /home/builder/src/packaging/arch/PKGBUILD /home/builder/pkgbuild/PKGBUILD
+          chown -R builder:builder /home/builder/src /home/builder/pkgbuild /artifacts
+
+          runuser -u builder -- bash -euxo pipefail -c '
+            cd /home/builder/pkgbuild
+            LIBRATBAG_SOURCE=/home/builder/src makepkg --noconfirm --needed --cleanbuild
+            cp ./*.pkg.tar.zst /artifacts/
+          '
+          EOF
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: artifacts/*.pkg.tar.zst
+          if-no-files-found: error
