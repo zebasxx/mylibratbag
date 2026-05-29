@@ -42,6 +42,7 @@ pkgver() {
 build() {
   meson setup "$srcdir/build" "$srcdir/libratbag" \
     --prefix=/usr \
+    --sbindir=bin \
     --buildtype=plain \
     -Dtests=false
   meson compile -C "$srcdir/build"
