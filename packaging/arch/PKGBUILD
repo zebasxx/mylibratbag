@@ -40,7 +40,10 @@ pkgver() {
 }
 
 build() {
-  arch-meson "$srcdir/libratbag" "$srcdir/build" -Dbuildtype=release -Dtests=false
+  meson setup "$srcdir/build" "$srcdir/libratbag" \
+    --prefix=/usr \
+    --buildtype=plain \
+    -Dtests=false
   meson compile -C "$srcdir/build"
 }
 
