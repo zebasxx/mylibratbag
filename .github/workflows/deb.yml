@@ -1,0 +1,67 @@
+name: deb
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  UBUNTU_DEP_BUILD: |
+    gcc g++ pkg-config systemd libevdev-dev libglib2.0-dev
+    libjson-glib-dev libsystemd-dev libudev-dev libunistring-dev
+    python3-dev python3-evdev python3-gi swig
+  PIP_PACKAGES: meson ninja
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pkginstall
+        with:
+          apt: $UBUNTU_DEP_BUILD
+          pip: $PIP_PACKAGES
+
+      - name: Build and stage install
+        run: |
+          meson setup builddir --prefix=/usr -Dbuildtype=release -Dtests=false
+          meson compile -C builddir
+          DESTDIR="$PWD/pkgroot" meson install -C builddir --no-rebuild
+
+      - name: Build Debian package
+        run: |
+          set -euo pipefail
+
+          version="$(meson introspect builddir --projectinfo | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          package_version="${version}+git${GITHUB_RUN_NUMBER}"
+          arch="$(dpkg --print-architecture)"
+          package_root="$PWD/pkgroot"
+          package_name="libratbag"
+
+          mkdir -p "$package_root/DEBIAN" artifacts
+          installed_size="$(du -sk "$package_root" | cut -f1)"
+
+          cat > "$package_root/DEBIAN/control" <<EOF
+          Package: $package_name
+          Version: $package_version
+          Section: utils
+          Priority: optional
+          Architecture: $arch
+          Maintainer: libratbag contributors <libratbag@lists.freedesktop.org>
+          Installed-Size: $installed_size
+          Depends: libc6, libevdev2, libglib2.0-0, libjson-glib-1.0-0, libsystemd0, libudev1, libunistring5, python3, python3-evdev, python3-gi
+          Description: DBus daemon and tools for configuring gaming mice
+           libratbag provides ratbagd, a DBus daemon for configuring input
+           devices, and ratbagctl, a command-line tool for interacting with it.
+          EOF
+
+          sed -i 's/^          //' "$package_root/DEBIAN/control"
+          find "$package_root" -type d -exec chmod 0755 {} +
+          dpkg-deb --root-owner-group --build "$package_root" "artifacts/${package_name}_${package_version}_${arch}.deb"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: artifacts/*.deb
